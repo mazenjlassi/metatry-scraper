@@ -1,4 +1,5 @@
 const { launchBrowser } = require('../utils/browser');
+const { randomDelay } = require('../utils/delays');
 const { createResponse, createResultObject } = require('../models/postModel');
 const { scrapeInstagram } = require('./instagramScraper');
 const { scrapeFacebook } = require('./facebookScraper');
@@ -10,13 +11,13 @@ async function scrapeAllPlatforms(accounts, companyName) {
   let browser = null;
   
   try {
-    const { browser: b, page: basePage } = await launchBrowser();
+    const { browser: b } = await launchBrowser();
     browser = b;
     
     const results = await Promise.all([
-      runInstagramScrape(basePage, accounts.instagram, companyName),
-      runFacebookScrape(basePage, accounts.facebook, companyName),
-      runLinkedInScrape(basePage, accounts.linkedin, companyName)
+      runPlatformScrape(browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
+      runPlatformScrape(browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
+      runPlatformScrape(browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
     ]);
     
     const response = createResponse(companyName, results.filter(r => r.posts.length > 0));
@@ -37,66 +38,32 @@ async function scrapeAllPlatforms(accounts, companyName) {
   }
 }
 
-async function runInstagramScrape(page, url, companyName) {
+async function runPlatformScrape(browser, platform, url, companyName, scraperFn) {
   if (!url) {
-    console.log('[Instagram] No URL provided, skipping...');
-    return createResultObject('instagram', []);
+    console.log(`[${platform}] No URL provided, skipping...`);
+    return createResultObject(platform, []);
   }
   
-  console.log(`[Instagram] Using URL: ${url}`);
-  const originalUrl = require('../config/settings').targetUrl;
-  require('../config/settings').targetUrl = url;
+  console.log(`[${platform}] Using URL: ${url}`);
   
+  let page = null;
   try {
-    const posts = await scrapeInstagram(page, companyName);
-    return createResultObject('instagram', posts);
+    page = await browser.newPage();
+    
+    const settings = require('../config/settings');
+    settings.targetUrl = url;
+    
+    const posts = await scraperFn(page, companyName);
+    console.log(`[${platform}] Scraped ${posts.length} posts`);
+    return createResultObject(platform, posts);
+    
   } catch (error) {
-    console.error(`[Instagram] Error: ${error.message}`);
-    return createResultObject('instagram', []);
+    console.log(`[${platform}] Error: ${error.message}`);
+    return createResultObject(platform, []);
   } finally {
-    require('../config/settings').targetUrl = originalUrl;
-  }
-}
-
-async function runFacebookScrape(page, url, companyName) {
-  if (!url) {
-    console.log('[Facebook] No URL provided, skipping...');
-    return createResultObject('facebook', []);
-  }
-  
-  console.log(`[Facebook] Using URL: ${url}`);
-  const originalUrl = require('../config/settings').targetUrl;
-  require('../config/settings').targetUrl = url;
-  
-  try {
-    const posts = await scrapeFacebook(page, companyName);
-    return createResultObject('facebook', posts);
-  } catch (error) {
-    console.error(`[Facebook] Error: ${error.message}`);
-    return createResultObject('facebook', []);
-  } finally {
-    require('../config/settings').targetUrl = originalUrl;
-  }
-}
-
-async function runLinkedInScrape(page, url, companyName) {
-  if (!url) {
-    console.log('[LinkedIn] No URL provided, skipping...');
-    return createResultObject('linkedin', []);
-  }
-  
-  console.log(`[LinkedIn] Using URL: ${url}`);
-  const originalUrl = require('../config/settings').targetUrl;
-  require('../config/settings').targetUrl = url;
-  
-  try {
-    const posts = await scrapeLinkedIn(page, companyName);
-    return createResultObject('linkedin', posts);
-  } catch (error) {
-    console.error(`[LinkedIn] Error: ${error.message}`);
-    return createResultObject('linkedin', []);
-  } finally {
-    require('../config/settings').targetUrl = originalUrl;
+    if (page) {
+      await page.close().catch(() => {});
+    }
   }
 }
 

@@ -4,32 +4,37 @@ const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType, extractTimestamp } = require('../parsers/baseParser');
 
 async function scrapeInstagram(page, companyName) {
-  console.log(`[Instagram] Scraping ${companyName}...`);
-  
-  await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-  await randomDelay(2000, 4000);
+  try {
+    console.log(`[Instagram] Scraping ${companyName}...`);
+    
+    await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay(2000, 4000);
 
-  const postUrls = await extractPostUrls(page);
-  console.log(`[Instagram] Found ${postUrls.length} post URLs`);
+    const postUrls = await extractPostUrls(page);
+    console.log(`[Instagram] Found ${postUrls.length} post URLs`);
 
-  const posts = [];
-  const limit = Math.min(postUrls.length, settings.postLimit);
+    const posts = [];
+    const limit = Math.min(postUrls.length, settings.postLimit);
 
-  for (let i = 0; i < limit; i++) {
-    console.log(`[Instagram] Scraping post ${i + 1}/${limit}...`);
-    try {
-      const post = await scrapePost(page, postUrls[i]);
-      if (post && post.postText.length > 10) {
-        posts.push(post);
+    for (let i = 0; i < limit; i++) {
+      console.log(`[Instagram] Scraping post ${i + 1}/${limit}...`);
+      try {
+        const post = await scrapePost(page, postUrls[i], companyName);
+        if (post && post.postText.length > 10) {
+          posts.push(post);
+        }
+      } catch (err) {
+        console.error(`[Instagram] Error scraping post ${i + 1}: ${err.message}`);
       }
-    } catch (err) {
-      console.error(`[Instagram] Error scraping post ${i + 1}: ${err.message}`);
+      await randomDelay(1500, 3000);
     }
-    await randomDelay(1500, 3000);
-  }
 
-  console.log(`[Instagram] Collected ${posts.length} posts`);
-  return posts;
+    console.log(`[Instagram] Collected ${posts.length} posts`);
+    return posts;
+  } catch (error) {
+    console.log(`[Instagram] Scraping failed: ${error.message}`);
+    return [];
+  }
 }
 
 async function extractPostUrls(page) {
@@ -43,11 +48,13 @@ async function extractPostUrls(page) {
   return [...new Set(urls)];
 }
 
-async function scrapePost(page, postUrl) {
+async function scrapePost(page, postUrl, companyName) {
   await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 15000 });
   await randomDelay(1500, 2500);
 
-  const postData = await page.evaluate(() => {
+  const companyLower = companyName.toLowerCase();
+  
+  const postData = await page.evaluate((company) => {
     const results = { 
       postText: '', 
       likes: '0', 
@@ -67,7 +74,7 @@ async function scrapePost(page, postUrl) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       
-      if (!foundUsername && (line.toLowerCase() === 'ibm' || line.toLowerCase() === 'tcsglobal')) {
+      if (!foundUsername && line.toLowerCase() === company) {
         foundUsername = true;
         inPostContent = true;
         continue;
@@ -154,7 +161,7 @@ async function scrapePost(page, postUrl) {
     }
     
     return results;
-  });
+  }, companyLower);
 
   let postedAt = postData.postedAt;
   if (!postedAt || !postedAt.includes('T')) {
@@ -168,7 +175,7 @@ async function scrapePost(page, postUrl) {
     }
   }
 
-  console.log(`[Instagram] @ibm: ${postData.postText.slice(0, 40)}...`);
+  console.log(`[Instagram] @${companyLower}: ${postData.postText.slice(0, 40)}...`);
   console.log(`[Instagram] Likes: ${postData.likes}, Comments: ${postData.comments}, Shares: ${postData.shares}`);
 
   if (postData.postText.length < 10) {

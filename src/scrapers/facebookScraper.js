@@ -4,15 +4,19 @@ const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType, extractTimestamp } = require('../parsers/baseParser');
 
 async function scrapeFacebook(page, companyName) {
-  console.log(`[Facebook] Scraping ${companyName}...`);
-  
-  await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-  await randomDelay(2000, 4000);
+  try {
+    console.log(`[Facebook] Scraping posts...`);
+    
+    await randomDelay(2000, 4000);
 
-  const posts = await extractFacebookPosts(page);
-  console.log(`[Facebook] Collected ${posts.length} posts`);
+    const posts = await extractFacebookPosts(page);
+    console.log(`[Facebook] Collected ${posts.length} posts`);
 
-  return posts;
+    return posts;
+  } catch (error) {
+    console.log(`[Facebook] Scraping failed: ${error.message}`);
+    return [];
+  }
 }
 
 async function extractFacebookPosts(page) {
