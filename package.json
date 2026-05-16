@@ -1,0 +1,21 @@
+{
+  "name": "metatry-scraper",
+  "version": "1.0.0",
+  "description": "Instagram/Facebook scraper for company pages",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "scraper",
+    "instagram",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "fs-extra": "^11.3.5",
+    "playwright": "^1.60.0"
+  }
+}
