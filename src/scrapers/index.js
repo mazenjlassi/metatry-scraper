@@ -51,9 +51,12 @@ async function runPlatformScrape(browser, platform, url, companyName, scraperFn)
     page = await browser.newPage();
     
     const settings = require('../config/settings');
+    const originalUrl = settings.targetUrl;
     settings.targetUrl = url;
     
     const posts = await scraperFn(page, companyName);
+    
+    settings.targetUrl = originalUrl;
     console.log(`[${platform}] Scraped ${posts.length} posts`);
     return createResultObject(platform, posts);
     
