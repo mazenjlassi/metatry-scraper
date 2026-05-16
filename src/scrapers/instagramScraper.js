@@ -1,34 +1,34 @@
 const settings = require('../config/settings');
 const { randomDelay } = require('../utils/delays');
-const { createPostModel } = require('../models/postModel');
-const { parseEngagementNumber, parseRelativeTime, extractHashtags, identifyMediaType } = require('../parsers/instagramParser');
+const { createPostModel, PLATFORMS } = require('../models/postModel');
+const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType, extractTimestamp } = require('../parsers/baseParser');
 
-async function scrapeInstagram(page) {
-  console.log(`Navigating to ${settings.targetUrl}...`);
+async function scrapeInstagram(page, companyName) {
+  console.log(`[Instagram] Scraping ${companyName}...`);
+  
   await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
   await randomDelay(2000, 4000);
 
   const postUrls = await extractPostUrls(page);
-  console.log(`Found ${postUrls.length} post URLs`);
+  console.log(`[Instagram] Found ${postUrls.length} post URLs`);
 
   const posts = [];
   const limit = Math.min(postUrls.length, settings.postLimit);
 
   for (let i = 0; i < limit; i++) {
-    console.log(`Scraping post ${i + 1}/${limit}...`);
+    console.log(`[Instagram] Scraping post ${i + 1}/${limit}...`);
     try {
       const post = await scrapePost(page, postUrls[i]);
       if (post && post.postText.length > 10) {
         posts.push(post);
-      } else {
-        console.log(`  - Skipped (invalid post)`);
       }
     } catch (err) {
-      console.error(`Error scraping post ${i + 1}: ${err.message}`);
+      console.error(`[Instagram] Error scraping post ${i + 1}: ${err.message}`);
     }
     await randomDelay(1500, 3000);
   }
 
+  console.log(`[Instagram] Collected ${posts.length} posts`);
   return posts;
 }
 
@@ -37,17 +37,10 @@ async function extractPostUrls(page) {
   
   const urls = await page.evaluate(() => {
     const links = document.querySelectorAll('a[href*="/p/"]');
-    const bodyText = document.body.innerText.slice(0, 500);
-    return { 
-      urls: Array.from(links).map(a => a.href).slice(0, 20),
-      bodyPreview: bodyText
-    };
+    return Array.from(links).map(a => a.href).slice(0, 30);
   });
 
-  console.log(`  - Page preview: ${urls.bodyPreview.slice(0, 100)}...`);
-  console.log(`  - Found ${urls.urls.length} post links`);
-  
-  return [...new Set(urls.urls)];
+  return [...new Set(urls)];
 }
 
 async function scrapePost(page, postUrl) {
@@ -55,7 +48,14 @@ async function scrapePost(page, postUrl) {
   await randomDelay(1500, 2500);
 
   const postData = await page.evaluate(() => {
-    const results = { postText: '', likes: '0', comments: '0', postedAt: '', username: '' };
+    const results = { 
+      postText: '', 
+      likes: '0', 
+      comments: '0', 
+      shares: '0',
+      postedAt: '', 
+      url: window.location.href 
+    };
     
     const bodyText = document.body.innerText;
     const lines = bodyText.split('\n').filter(line => line.trim());
@@ -67,22 +67,15 @@ async function scrapePost(page, postUrl) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       
-      if (!foundUsername && line.toLowerCase() === 'ibm') {
-        results.username = 'ibm';
+      if (!foundUsername && (line.toLowerCase() === 'ibm' || line.toLowerCase() === 'tcsglobal')) {
         foundUsername = true;
         inPostContent = true;
-        
-        if (i + 1 < lines.length) {
-          const nextLine = lines[i + 1].trim();
-          if (nextLine.match(/^\d+[dwmyh]$/i) || nextLine === 'Edited') {
-            results.postedAt = new Date().toISOString();
-          }
-        }
         continue;
       }
       
       if (foundUsername && inPostContent) {
         if (line.match(/^\d+[dwmyh]$/i) || line === 'Edited') {
+          if (!results.postedAt) results.postedAt = line;
           continue;
         }
         
@@ -144,31 +137,59 @@ async function scrapePost(page, postUrl) {
       }
     }
     
+    const shareButtons = document.querySelectorAll('button, a');
+    for (const btn of shareButtons) {
+      const text = btn.innerText?.toLowerCase() || '';
+      if (text.includes('share') || text.includes('send')) {
+        const parent = btn.closest('article') || btn.closest('section');
+        if (parent) {
+          const shareText = parent.innerText || '';
+          const shareMatch = shareText.match(/([\d,.]+[KMB]?)\s*(share|send)/i);
+          if (shareMatch) {
+            results.shares = shareMatch[1];
+          }
+        }
+        break;
+      }
+    }
+    
     return results;
   });
 
-  console.log(`  - @${postData.username}: ${postData.postText.slice(0, 40)}...`);
-  console.log(`  - Likes: ${postData.likes}, Comments: ${postData.comments}`);
+  let postedAt = postData.postedAt;
+  if (!postedAt || !postedAt.includes('T')) {
+    const timeAttr = await extractTimestamp(page);
+    if (timeAttr && timeAttr.includes('T')) {
+      postedAt = timeAttr;
+    } else if (timeAttr) {
+      postedAt = parseRelativeTime(timeAttr);
+    } else {
+      postedAt = new Date().toISOString();
+    }
+  }
 
-  if (!postData.username || postData.postText.length < 10) {
-    console.log(`  - Skipped (no valid data)`);
+  console.log(`[Instagram] @ibm: ${postData.postText.slice(0, 40)}...`);
+  console.log(`[Instagram] Likes: ${postData.likes}, Comments: ${postData.comments}, Shares: ${postData.shares}`);
+
+  if (postData.postText.length < 10) {
     return null;
   }
 
   const mediaType = await identifyMediaType(page);
   const hashtags = extractHashtags(postData.postText);
+  const mentions = extractMentions(postData.postText);
 
   return createPostModel({
-    platform: settings.platform,
-    company: settings.company,
     postText: postData.postText,
     likes: parseEngagementNumber(postData.likes),
     comments: parseEngagementNumber(postData.comments),
-    shares: 0,
-    postedAt: postData.postedAt,
+    shares: parseEngagementNumber(postData.shares),
+    postedAt,
     mediaType,
-    hashtags
+    hashtags,
+    mentions,
+    url: postData.url
   });
 }
 
-module.exports = { scrapeInstagram };
+module.exports = { scrapeInstagram, PLATFORMS: PLATFORMS.INSTAGRAM };

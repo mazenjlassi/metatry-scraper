@@ -1,20 +1,26 @@
 {
   "name": "metatry-scraper",
   "version": "1.0.0",
-  "description": "Instagram/Facebook scraper for company pages",
-  "main": "src/index.js",
+  "description": "Multi-platform social media scraper for competitor analysis",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/server.js",
+    "cli": "node src/index.js"
   },
   "keywords": [
     "scraper",
     "instagram",
+    "facebook",
+    "linkedin",
     "playwright"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
     "dotenv": "^17.4.2",
+    "express": "^4.21.2",
     "fs-extra": "^11.3.5",
     "playwright": "^1.60.0"
   }

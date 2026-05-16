@@ -4,7 +4,7 @@ const { scrapeInstagram } = require('./scrapers/instagramScraper');
 const settings = require('./config/settings');
 
 async function main() {
-  console.log('=== Metatry Scraper - Instagram ===');
+  console.log('=== MetaTry Scraper - CLI Mode ===');
   console.log(`Target: ${settings.targetUrl}`);
   console.log(`Post limit: ${settings.postLimit}`);
   console.log('');
@@ -17,7 +17,7 @@ async function main() {
     browser = b;
 
     console.log('Starting scraper...');
-    const posts = await scrapeInstagram(page);
+    const posts = await scrapeInstagram(page, 'IBM');
 
     console.log(`\nCollected ${posts.length} posts`);
     
