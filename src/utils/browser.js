@@ -42,6 +42,43 @@ async function loginToInstagram(page) {
   return true;
 }
 
+async function loginToFacebook(page) {
+  const username = process.env.FACEBOOK_USERNAME;
+  const password = process.env.FACEBOOK_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error('Facebook credentials not found in .env');
+  }
+
+  console.log('[Browser] Navigating to Facebook login...');
+  await page.goto('https://www.facebook.com/login/', { waitUntil: 'networkidle', timeout: 30000 });
+  await randomDelay(2000, 3000);
+
+  console.log('[Browser] Entering email...');
+  await page.fill('#email', username);
+  await randomDelay(500, 1000);
+
+  console.log('[Browser] Entering password...');
+  await page.fill('#pass', password);
+  await randomDelay(500, 1000);
+
+  console.log('[Browser] Clicking login button...');
+  await page.click('button[name="login"]');
+  
+  await randomDelay(8000, 12000);
+
+  const currentUrl = page.url();
+  console.log('[Browser] URL after login:', currentUrl);
+
+  if (currentUrl.includes('checkpoint') || currentUrl.includes('login') || currentUrl.includes('security')) {
+    console.log('[Browser] Facebook login may require verification');
+    return false;
+  }
+
+  console.log('[Browser] Facebook login successful!');
+  return true;
+}
+
 async function randomDelay(min, max) {
   const ms = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -93,4 +130,4 @@ async function launchBrowser() {
   return { browser, context, page };
 }
 
-module.exports = { launchBrowser, loginToInstagram };
+module.exports = { launchBrowser, loginToInstagram, loginToFacebook };

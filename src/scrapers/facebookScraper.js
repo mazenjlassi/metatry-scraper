@@ -2,6 +2,41 @@ const settings = require('../config/settings');
 const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType, extractTimestamp } = require('../parsers/baseParser');
+const { loginToFacebook } = require('../utils/browser');
+
+async function ensureFacebookLoggedIn(page) {
+  console.log('[Facebook] Checking login status...');
+  
+  await page.goto('https://www.facebook.com/', { waitUntil: 'networkidle', timeout: 15000 });
+  await randomDelay(2000, 3000);
+  
+  const pageUrl = page.url();
+  console.log('[Facebook] Current URL:', pageUrl);
+  
+  const isLoggedIn = await page.evaluate(() => {
+    const bodyText = document.body.innerText;
+    // Check for login indicators
+    const hasLoginForm = document.querySelector('#login_form') !== null;
+    const hasLoginButton = document.querySelector('button[name="login"]') !== null;
+    const hasConnectText = bodyText.includes('Connect with friends') && bodyText.includes('Create an account');
+    return !hasLoginForm && !hasLoginButton && !hasConnectText;
+  });
+  
+  console.log('[Facebook] Is logged in:', isLoggedIn);
+  
+  if (!isLoggedIn) {
+    console.log('[Facebook] Not logged in - performing login...');
+    const loginSuccess = await loginToFacebook(page);
+    if (!loginSuccess) {
+      console.log('[Facebook] Login failed or needs verification');
+      return false;
+    }
+  } else {
+    console.log('[Facebook] Already logged in');
+  }
+  
+  return true;
+}
 
 async function scrapeFacebookDesktop(page, url) {
   console.log(`[Facebook] Scraping desktop: ${url}`);
@@ -59,31 +94,41 @@ async function scrapeFacebookVideos(page, url) {
 
 async function scrapeFacebook(page, companyName) {
   try {
-    let targetUrl = settings.targetUrl;
-    
-    // Remove /posts/ endpoint - just use main page
-    targetUrl = targetUrl.replace('/posts/', '/').replace(/\/$/, '');
     console.log(`[Facebook] Scraping ${companyName}...`);
+    
+    let targetUrl = settings.targetUrl;
     console.log(`[Facebook] Target URL: ${targetUrl}`);
     
-    // Scrape desktop
-    const desktopPosts = await scrapeFacebookDesktop(page, targetUrl);
+    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay(3000, 5000);
     
-    // Scrape mobile
-    const mobilePosts = await scrapeFacebookMobile(page, targetUrl);
+    console.log('[Facebook] Scrolling...');
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.scrollBy(0, 600));
+      await randomDelay(1500, 2500);
+    }
     
-    // Scrape videos
-    const videoPosts = await scrapeFacebookVideos(page, targetUrl);
+    const posts = await extractFacebookPosts(page);
+    console.log(`[Facebook] Collected ${posts.length} posts`);
     
-    // Combine and deduplicate
-    const allPosts = [...desktopPosts, ...mobilePosts, ...videoPosts];
-    console.log(`[Facebook] Total before filter: ${allPosts.length} posts`);
+    const validPosts = [];
+    const seenTexts = new Set();
+    const skipTexts = ['nasa -', 'informations de compte', 'national aeronautics', 'space administration'];
     
-    // Filter and limit to 10
-    const filteredPosts = filterAndLimitPosts(allPosts, 10);
-    console.log(`[Facebook] Final posts: ${filteredPosts.length}`);
+    for (const post of posts) {
+      if (!post.url || post.url.length < 10) continue;
+      const text = (post.postText || '').toLowerCase();
+      if (skipTexts.some(t => text.includes(t))) continue;
+      const key = text.slice(0, 30);
+      if (seenTexts.has(key)) continue;
+      if (validPosts.length < 10) {
+        validPosts.push(post);
+        seenTexts.add(key);
+      }
+    }
     
-    return filteredPosts;
+    console.log(`[Facebook] Final: ${validPosts.length} posts`);
+    return validPosts;
   } catch (error) {
     console.log(`[Facebook] Scraping failed: ${error.message}`);
     return [];
