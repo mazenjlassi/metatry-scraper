@@ -3,6 +3,7 @@ const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseRelativeTime, extractHashtags, extractMentions, extractTimestamp, identifyMediaType } = require('../parsers/baseParser');
 
+
 async function closeLoginPopup(page) {
   try {
     await page.evaluate(() => {
@@ -152,48 +153,12 @@ async function scrapePost(page, postUrl, companyName) {
       return results;
     }, companyLower);
     
-    const article = await page.$('article');
-    console.log('[Instagram] Article found:', !!article);
-    
-    let likes = '0';
-    let comments = '0';
-    
-    if (article) {
-      const articleText = await article.innerText();
-      
-      console.log('[DEBUG] Looking for likes in:', articleText.slice(0, 300));
-      
-      const likeMatch = articleText.match(/([\d,.]+[KMB]?)\s*like/i);
-      if (likeMatch) {
-        likes = likeMatch[1];
-      }
-      
-      const commentMatch = articleText.match(/([\d,.]+[KMB]?)\s*comment/i);
-      if (commentMatch) {
-        comments = commentMatch[1];
-      }
-      
-      if (likes === '0') {
-        const allNums = articleText.match(/[\d,.]+[KMB]?/gi) || [];
-        const kNum = allNums.find(n => n.toLowerCase().includes('k') || n.toLowerCase().includes('m'));
-        if (kNum) likes = kNum;
-      }
-    }
-    
     let postedAt = postData.postedAt;
     if (!postedAt || !postedAt.includes('T')) {
-      const timeAttr = await extractTimestamp(page);
-      if (timeAttr && timeAttr.includes('T')) {
-        postedAt = timeAttr;
-      } else if (timeAttr) {
-        postedAt = parseRelativeTime(timeAttr);
-      } else {
-        postedAt = new Date().toISOString();
-      }
+      postedAt = new Date().toISOString();
     }
     
     console.log(`[Instagram] @${companyLower}: ${postData.postText.slice(0, 40)}...`);
-    console.log(`[Instagram] Likes: ${likes}, Comments: ${comments}`);
 
     if (postData.postText.length < 10) {
       return null;
@@ -205,9 +170,6 @@ async function scrapePost(page, postUrl, companyName) {
 
     return createPostModel({
       postText: postData.postText,
-      likes: likes,
-      comments: comments,
-      shares: '0',
       postedAt,
       mediaType,
       hashtags,

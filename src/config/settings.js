@@ -2,7 +2,7 @@ require('dotenv').config();
 
 module.exports = {
   targetUrl: process.env.TARGET_URL || 'https://www.instagram.com/ibm',
-  postLimit: 20,
+  postLimit: 15,
   headless: process.env.HEADLESS === 'true',
   slowMo: parseInt(process.env.SLOWMO) || 100,
   viewport: { width: 1280, height: 720 },

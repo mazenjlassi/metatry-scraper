@@ -7,9 +7,6 @@ const PLATFORMS = {
 function createPostModel(data = {}) {
   return {
     postText: data.postText || '',
-    likes: data.likes || 0,
-    comments: data.comments || 0,
-    shares: data.shares || 0,
     postedAt: data.postedAt || '',
     mediaType: data.mediaType || 'unknown',
     hashtags: data.hashtags || [],
