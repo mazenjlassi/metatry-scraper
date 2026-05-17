@@ -5,9 +5,11 @@ const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentio
 
 async function scrapeLinkedIn(page, companyName) {
   try {
-    console.log(`[LinkedIn] Scraping posts...`);
+    console.log(`[LinkedIn] Scraping ${companyName}...`);
+    console.log(`[LinkedIn] Target URL: ${settings.targetUrl}`);
     
-    await randomDelay(2000, 4000);
+    await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay(3000, 5000);
 
     const posts = await extractLinkedInPosts(page);
     console.log(`[LinkedIn] Collected ${posts.length} posts`);
@@ -21,6 +23,14 @@ async function scrapeLinkedIn(page, companyName) {
 
 async function extractLinkedInPosts(page) {
   await randomDelay(3000, 5000);
+  
+  const debug = await page.evaluate(() => ({
+    title: document.title,
+    url: window.location.href,
+    hasLogin: document.body.innerText.includes('Sign in') || document.body.innerText.includes('Join LinkedIn'),
+    bodyText: document.body.innerText.slice(0, 300)
+  }));
+  console.log('[LinkedIn] Debug:', debug);
 
   const postsData = await page.evaluate(() => {
     const results = [];
@@ -123,9 +133,6 @@ async function extractLinkedInPosts(page) {
     
     posts.push(createPostModel({
       postText: postData.postText,
-      likes: parseEngagementNumber(postData.likes),
-      comments: parseEngagementNumber(postData.comments),
-      shares: parseEngagementNumber(postData.shares),
       postedAt,
       mediaType: postData.mediaType,
       hashtags,

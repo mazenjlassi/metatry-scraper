@@ -5,9 +5,11 @@ const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentio
 
 async function scrapeFacebook(page, companyName) {
   try {
-    console.log(`[Facebook] Scraping posts...`);
+    console.log(`[Facebook] Scraping ${companyName}...`);
+    console.log(`[Facebook] Target URL: ${settings.targetUrl}`);
     
-    await randomDelay(2000, 4000);
+    await page.goto(settings.targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay(3000, 5000);
 
     const posts = await extractFacebookPosts(page);
     console.log(`[Facebook] Collected ${posts.length} posts`);
@@ -20,7 +22,7 @@ async function scrapeFacebook(page, companyName) {
 }
 
 async function extractFacebookPosts(page) {
-  await randomDelay(3000, 5000);
+  await randomDelay(2000, 3000);
 
   const postsData = await page.evaluate(() => {
     const results = [];
@@ -111,9 +113,6 @@ async function extractFacebookPosts(page) {
     
     posts.push(createPostModel({
       postText: postData.postText,
-      likes: parseEngagementNumber(postData.likes),
-      comments: parseEngagementNumber(postData.comments),
-      shares: parseEngagementNumber(postData.shares),
       postedAt,
       mediaType: 'post',
       hashtags,
