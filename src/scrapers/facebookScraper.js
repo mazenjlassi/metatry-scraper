@@ -3,49 +3,120 @@ const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType, extractTimestamp } = require('../parsers/baseParser');
 
+async function scrapeFacebookDesktop(page, url) {
+  console.log(`[Facebook] Scraping desktop: ${url}`);
+  await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+  await randomDelay(3000, 5000);
+  
+  // Scroll
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.scrollBy(0, 600));
+    await randomDelay(1500, 2500);
+  }
+  
+  const posts = await extractFacebookPosts(page);
+  console.log(`[Facebook] Desktop got: ${posts.length} posts`);
+  return posts;
+}
+
+async function scrapeFacebookMobile(page, url) {
+  const mobileUrl = url.replace('www.facebook.com', 'm.facebook.com');
+  console.log(`[Facebook] Scraping mobile: ${mobileUrl}`);
+  await page.goto(mobileUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  await randomDelay(3000, 5000);
+  
+  // Scroll
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.scrollBy(0, 600));
+    await randomDelay(1500, 2500);
+  }
+  
+  const posts = await extractFacebookPosts(page);
+  console.log(`[Facebook] Mobile got: ${posts.length} posts`);
+  return posts;
+}
+
+async function scrapeFacebookVideos(page, url) {
+  const videosUrl = url.replace(/\/$/, '') + '/videos/';
+  console.log(`[Facebook] Scraping videos: ${videosUrl}`);
+  try {
+    await page.goto(videosUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay(3000, 5000);
+    
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.scrollBy(0, 500));
+      await randomDelay(1000, 1500);
+    }
+    
+    const posts = await extractFacebookPosts(page);
+    console.log(`[Facebook] Videos got: ${posts.length} posts`);
+    return posts;
+  } catch (e) {
+    console.log(`[Facebook] Videos page failed: ${e.message}`);
+    return [];
+  }
+}
+
 async function scrapeFacebook(page, companyName) {
   try {
     let targetUrl = settings.targetUrl;
     
-    // Try /posts/ endpoint for more content
-    if (!targetUrl.endsWith('/posts/') && !targetUrl.includes('/posts?')) {
-      targetUrl = targetUrl.replace(/\/$/, '') + '/posts/';
-      console.log(`[Facebook] Using posts endpoint: ${targetUrl}`);
-    }
-    
+    // Remove /posts/ endpoint - just use main page
+    targetUrl = targetUrl.replace('/posts/', '/').replace(/\/$/, '');
     console.log(`[Facebook] Scraping ${companyName}...`);
     console.log(`[Facebook] Target URL: ${targetUrl}`);
     
-    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await randomDelay(3000, 5000);
+    // Scrape desktop
+    const desktopPosts = await scrapeFacebookDesktop(page, targetUrl);
     
-    // Check if we got login prompt - if so, try mobile
-    const needsLogin = await page.evaluate(() => {
-      return document.body.innerText.includes('Connect with friends') || 
-             document.body.innerText.includes('Create an account');
-    });
+    // Scrape mobile
+    const mobilePosts = await scrapeFacebookMobile(page, targetUrl);
     
-    if (needsLogin && targetUrl.includes('www.facebook.com')) {
-      console.log('[Facebook] Desktop version needs login, trying mobile...');
-      targetUrl = targetUrl.replace('www.facebook.com', 'm.facebook.com');
-      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await randomDelay(3000, 5000);
-    }
-
-    console.log('[Facebook] Scrolling to load more posts...');
-    for (let i = 0; i < 10; i++) {
-      await page.evaluate(() => window.scrollBy(0, 800));
-      await randomDelay(2000, 3000);
-    }
-
-    const posts = await extractFacebookPosts(page);
-    console.log(`[Facebook] Collected ${posts.length} posts`);
-
-    return posts;
+    // Scrape videos
+    const videoPosts = await scrapeFacebookVideos(page, targetUrl);
+    
+    // Combine and deduplicate
+    const allPosts = [...desktopPosts, ...mobilePosts, ...videoPosts];
+    console.log(`[Facebook] Total before filter: ${allPosts.length} posts`);
+    
+    // Filter and limit to 10
+    const filteredPosts = filterAndLimitPosts(allPosts, 10);
+    console.log(`[Facebook] Final posts: ${filteredPosts.length}`);
+    
+    return filteredPosts;
   } catch (error) {
     console.log(`[Facebook] Scraping failed: ${error.message}`);
     return [];
   }
+}
+
+function filterAndLimitPosts(posts, limit) {
+  const validPosts = [];
+  const seenTexts = new Set();
+  const skipTexts = ['nasa -', 'informations de compte', 'national aeronautics', 'space administration', 'followers', 'suivi'];
+  
+  for (const post of posts) {
+    // Skip posts without valid URL (not real posts)
+    if (!post.url || post.url.length < 10) {
+      continue;
+    }
+    
+    const text = (post.postText || '').toLowerCase();
+    const isGarbage = skipTexts.some(t => text.includes(t.toLowerCase()));
+    
+    // Skip duplicates by text content
+    const textKey = text.slice(0, 30);
+    if (seenTexts.has(textKey) || isGarbage) {
+      continue;
+    }
+    
+    if (validPosts.length < limit) {
+      validPosts.push(post);
+      seenTexts.add(textKey);
+    }
+  }
+  
+  return validPosts;
 }
 
 async function extractFacebookPosts(page) {
@@ -142,8 +213,9 @@ async function extractFacebookPosts(page) {
   
 console.log('[Facebook] Total posts to filter:', postsData.length);
   
-  // Just take first 2 valid posts to avoid garbage
+  // Take first 5 valid posts with deduplication
   const validPosts = [];
+  const seenTexts = new Set();
   const skipTexts = ['nasa -', 'informations de compte', 'national aeronautics', 'space administration'];
   
   for (const post of postsData) {
@@ -156,15 +228,23 @@ console.log('[Facebook] Total posts to filter:', postsData.length);
     const text = (post.postText || '').toLowerCase();
     const isGarbage = skipTexts.some(t => text.includes(t.toLowerCase()));
     
-    if (!isGarbage && validPosts.length < 2) {
+    // Skip duplicates by text content
+    const textKey = text.slice(0, 30);
+    if (seenTexts.has(textKey)) {
+      console.log(`[Facebook] Skipped: duplicate`);
+      continue;
+    }
+    
+    if (!isGarbage && validPosts.length < 5) {
       validPosts.push(post);
+      seenTexts.add(textKey);
       console.log(`[Facebook] Kept: "${post.postText?.slice(0,40)}..."`);
     }
   }
   
   console.log('[Facebook] Filtered to:', validPosts.length, 'posts');
   
-  const finalPostsData = validPosts.slice(0, 2);
+  const finalPostsData = validPosts.slice(0, 5);
 
   const posts = [];
   for (const postData of finalPostsData.slice(0, settings.postLimit)) {
