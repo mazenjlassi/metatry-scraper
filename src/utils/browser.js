@@ -42,15 +42,44 @@ async function loginToInstagram(page) {
   return true;
 }
 
-async function loginToFacebook(page) {
+async function loginToFacebook(page, context) {
   const username = process.env.FACEBOOK_USERNAME;
   const password = process.env.FACEBOOK_PASSWORD;
+  const facebookSessionFile = path.join(sessionDir, 'facebook.json');
+
+  // Check for existing session
+  if (await fs.pathExists(facebookSessionFile)) {
+    try {
+      const cookies = await fs.readJson(facebookSessionFile);
+      if (cookies && cookies.length > 0) {
+        await context.addCookies(cookies);
+        console.log('[Browser] Loaded existing Facebook session');
+        
+        // Verify session works
+        await page.goto('https://www.facebook.com/', { waitUntil: 'networkidle', timeout: 15000 });
+        await randomDelay(2000, 3000);
+        
+        const isLoggedIn = await page.evaluate(() => {
+          return !document.body.innerText.includes('Connect with friends');
+        });
+        
+        if (isLoggedIn) {
+          console.log('[Browser] Facebook session valid!');
+          return true;
+        }
+        console.log('[Browser] Existing session expired, need new login');
+      }
+    } catch (e) {
+      console.log('[Browser] Error loading Facebook session:', e.message);
+    }
+  }
 
   if (!username || !password) {
     throw new Error('Facebook credentials not found in .env');
   }
 
   console.log('[Browser] Navigating to Facebook login...');
+  console.log('[Browser] NOTE: Browser is NOT headless - you can handle 2FA manually if needed');
   await page.goto('https://www.facebook.com/login/', { waitUntil: 'networkidle', timeout: 30000 });
   await randomDelay(2000, 3000);
 
@@ -65,15 +94,33 @@ async function loginToFacebook(page) {
   console.log('[Browser] Clicking login button...');
   await page.click('button[name="login"]');
   
-  await randomDelay(8000, 12000);
+  console.log('[Browser] Waiting for login... (if 2FA needed, enter code in browser)');
+  await randomDelay(10000, 15000);
 
   const currentUrl = page.url();
   console.log('[Browser] URL after login:', currentUrl);
 
-  if (currentUrl.includes('checkpoint') || currentUrl.includes('login') || currentUrl.includes('security')) {
-    console.log('[Browser] Facebook login may require verification');
-    return false;
+  if (currentUrl.includes('checkpoint') || currentUrl.includes('security')) {
+    console.log('[Browser] ========== VERIFICATION NEEDED ==========');
+    console.log('[Browser] Please complete verification in the browser window');
+    console.log('[Browser] Waiting 60 seconds for manual verification...');
+    await randomDelay(60000, 60000);
+    
+    const finalUrl = page.url();
+    if (!finalUrl.includes('checkpoint') && !finalUrl.includes('security')) {
+      console.log('[Browser] Verification completed!');
+    } else {
+      console.log('[Browser] Verification not completed');
+      return false;
+    }
   }
+
+  // Save session on success
+  try {
+    const cookies = await context.cookies();
+    await fs.writeJson(facebookSessionFile, cookies);
+    console.log('[Browser] Saved Facebook session cookies');
+  } catch (e) {}
 
   console.log('[Browser] Facebook login successful!');
   return true;
@@ -98,22 +145,36 @@ async function launchBrowser() {
     locale: 'en-US'
   });
 
-  const sessionFile = path.join(sessionDir, 'instagram.json');
-  
-  if (await fs.pathExists(sessionFile)) {
+  // Load Instagram cookies
+  const instagramSessionFile = path.join(sessionDir, 'instagram.json');
+  if (await fs.pathExists(instagramSessionFile)) {
     try {
-      const cookies = await fs.readJson(sessionFile);
+      const cookies = await fs.readJson(instagramSessionFile);
       if (cookies && cookies.length > 0) {
         const hasSessionId = cookies.some(c => c.name === 'sessionid');
         if (hasSessionId) {
           await context.addCookies(cookies);
-          console.log('[Browser] Loaded saved session with auth tokens');
+          console.log('[Browser] Loaded saved Instagram session with auth tokens');
         } else {
-          console.log('[Browser] Session cookies found but no auth token - will login');
+          console.log('[Browser] Instagram session cookies found but no auth token - will login');
         }
       }
     } catch (e) {
-      console.log('[Browser] Error loading session:', e.message);
+      console.log('[Browser] Error loading Instagram session:', e.message);
+    }
+  }
+
+  // Load Facebook cookies
+  const facebookCookieFile = path.join(sessionDir, 'facebook-cookies.json');
+  if (await fs.pathExists(facebookCookieFile)) {
+    try {
+      const cookies = await fs.readJson(facebookCookieFile);
+      if (cookies && cookies.length > 0) {
+        await context.addCookies(cookies);
+        console.log('[Browser] Loaded Facebook cookies');
+      }
+    } catch (e) {
+      console.log('[Browser] Error loading Facebook cookies:', e.message);
     }
   }
 

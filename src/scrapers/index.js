@@ -3,6 +3,7 @@ const { randomDelay } = require('../utils/delays');
 const { createResponse, createResultObject } = require('../models/postModel');
 const { scrapeInstagram } = require('./instagramScraper');
 const { scrapeFacebook } = require('./facebookScraper');
+const { scrapeLinkedIn } = require('./linkedinScraper');
 
 async function scrapeAllPlatforms(accounts, companyName) {
   console.log(`\n=== Starting parallel scrape for ${companyName} ===\n`);
@@ -15,7 +16,8 @@ async function scrapeAllPlatforms(accounts, companyName) {
     
     const results = await Promise.all([
       runPlatformScrape(browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
-      runPlatformScrape(browser, 'facebook', accounts.facebook, companyName, scrapeFacebook)
+      runPlatformScrape(browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
+      runPlatformScrape(browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
     ]);
     
     const response = createResponse(companyName, results.filter(r => r.posts.length > 0));
@@ -52,7 +54,14 @@ async function runPlatformScrape(browser, platform, url, companyName, scraperFn)
     const originalUrl = settings.targetUrl;
     settings.targetUrl = url;
     
-    const posts = await scraperFn(page, companyName);
+    let posts;
+    if (platform === 'facebook') {
+      posts = await scraperFn(page, companyName, browser);
+    } else if (platform === 'linkedin') {
+      posts = await scraperFn(page, companyName);
+    } else {
+      posts = await scraperFn(page, companyName);
+    }
     
     settings.targetUrl = originalUrl;
     console.log(`[${platform}] Scraped ${posts.length} posts`);
