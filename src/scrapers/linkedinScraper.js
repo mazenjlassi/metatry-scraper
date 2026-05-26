@@ -1,20 +1,19 @@
-const settings = require('../config/settings');
 const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 
-async function scrapeLinkedIn(page, companyName) {
+async function scrapeLinkedIn(page, companyName, url) {
   try {
-    let targetUrl = settings.targetUrl;
+    const targetUrl = url;
     console.log(`[LinkedIn] Scraping ${companyName}...`);
     console.log(`[LinkedIn] Target URL: ${targetUrl}`);
     
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await randomDelay(4000, 6000);
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await randomDelay(2000, 3000);
     
     console.log('[LinkedIn] Scrolling to load posts...');
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       await page.evaluate(() => window.scrollBy(0, 500));
-      await randomDelay(2000, 3000);
+      await randomDelay(1500, 2000);
     }
     
     const posts = await extractLinkedInPosts(page);
@@ -29,7 +28,7 @@ async function scrapeLinkedIn(page, companyName) {
 }
 
 async function extractLinkedInPosts(page) {
-  await randomDelay(2000, 3000);
+  await randomDelay(1000, 1500);
 
   const postsData = await page.evaluate(() => {
     const results = [];

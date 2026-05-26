@@ -11,13 +11,13 @@ async function scrapeAllPlatforms(accounts, companyName) {
   let browser = null;
   
   try {
-    const { browser: b } = await launchBrowser();
+    const { browser: b, context: ctx } = await launchBrowser();
     browser = b;
     
     const results = await Promise.all([
-      runPlatformScrape(browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
-      runPlatformScrape(browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
-      runPlatformScrape(browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
+      runPlatformScrape(ctx, browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
+      runPlatformScrape(ctx, browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
+      runPlatformScrape(ctx, browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
     ]);
     
     const response = createResponse(companyName, results.filter(r => r.posts.length > 0));
@@ -38,7 +38,9 @@ async function scrapeAllPlatforms(accounts, companyName) {
   }
 }
 
-async function runPlatformScrape(browser, platform, url, companyName, scraperFn) {
+const PLATFORM_TIMEOUT_MS = 180000;
+
+async function runPlatformScrape(ctx, browser, platform, url, companyName, scraperFn) {
   if (!url) {
     console.log(`[${platform}] No URL provided, skipping...`);
     return createResultObject(platform, []);
@@ -46,24 +48,31 @@ async function runPlatformScrape(browser, platform, url, companyName, scraperFn)
   
   console.log(`[${platform}] Using URL: ${url}`);
   
+  return Promise.race([
+    doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn),
+    new Promise(resolve => {
+      setTimeout(() => {
+        console.log(`[${platform}] Timed out after ${PLATFORM_TIMEOUT_MS}ms`);
+        resolve(createResultObject(platform, []));
+      }, PLATFORM_TIMEOUT_MS);
+    })
+  ]);
+}
+
+async function doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn) {
   let page = null;
   try {
-    page = await browser.newPage();
-    
-    const settings = require('../config/settings');
-    const originalUrl = settings.targetUrl;
-    settings.targetUrl = url;
+    page = await ctx.newPage();
     
     let posts;
     if (platform === 'facebook') {
-      posts = await scraperFn(page, companyName, browser);
+      posts = await scraperFn(page, companyName, browser, ctx, url);
     } else if (platform === 'linkedin') {
-      posts = await scraperFn(page, companyName);
+      posts = await scraperFn(page, companyName, url);
     } else {
-      posts = await scraperFn(page, companyName);
+      posts = await scraperFn(page, companyName, ctx, url);
     }
     
-    settings.targetUrl = originalUrl;
     console.log(`[${platform}] Scraped ${posts.length} posts`);
     return createResultObject(platform, posts);
     

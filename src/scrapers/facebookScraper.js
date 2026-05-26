@@ -1,16 +1,16 @@
-const settings = require('../config/settings');
 const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { parseEngagementNumber, parseRelativeTime, extractHashtags, extractMentions, identifyMediaType } = require('../parsers/baseParser');
+const { loginToFacebook } = require('../utils/browser');
 
 async function scrapeFacebookDesktop(page, url) {
   console.log(`[Facebook] Desktop: ${url}`);
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-  await randomDelay(4000, 6000);
+  await page.goto(url, { waitUntil: 'load', timeout: 15000 });
+  await randomDelay(2000, 3000);
   
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 5; i++) {
     await page.evaluate(() => window.scrollBy(0, 600));
-    await randomDelay(2000, 3500);
+    await randomDelay(1000, 2000);
   }
   
   const posts = await extractFacebookPosts(page);
@@ -22,12 +22,12 @@ async function scrapeFacebookMobile(page, url) {
   const mobileUrl = url.replace('www.facebook.com', 'm.facebook.com');
   console.log(`[Facebook] Mobile: ${mobileUrl}`);
   try {
-    await page.goto(mobileUrl, { waitUntil: 'networkidle', timeout: 25000 });
-    await randomDelay(4000, 6000);
+    await page.goto(mobileUrl, { waitUntil: 'load', timeout: 15000 });
+    await randomDelay(2000, 3000);
     
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       await page.evaluate(() => window.scrollBy(0, 500));
-      await randomDelay(2000, 3000);
+      await randomDelay(1000, 1500);
     }
     
     const posts = await extractFacebookPosts(page);
@@ -43,12 +43,12 @@ async function scrapeFacebookVideos(page, url) {
   const videosUrl = url.replace(/\/$/, '') + '/videos/';
   console.log(`[Facebook] Videos: ${videosUrl}`);
   try {
-    await page.goto(videosUrl, { waitUntil: 'networkidle', timeout: 25000 });
-    await randomDelay(3000, 5000);
+    await page.goto(videosUrl, { waitUntil: 'load', timeout: 15000 });
+    await randomDelay(2000, 3000);
     
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, 500));
-      await randomDelay(1500, 2500);
+      await randomDelay(1000, 1500);
     }
     
     const posts = await extractFacebookPosts(page);
@@ -60,15 +60,17 @@ async function scrapeFacebookVideos(page, url) {
   }
 }
 
-async function scrapeFacebook(page, companyName, browser) {
+async function scrapeFacebook(page, companyName, browser, ctx, url) {
   try {
-    let targetUrl = settings.targetUrl;
-    targetUrl = targetUrl.replace('/posts/', '/').replace(/\/$/, '');
+    const targetUrl = url.replace('/posts/', '/').replace(/\/$/, '');
     
     console.log(`[Facebook] Scraping ${companyName}...`);
     console.log(`[Facebook] Target: ${targetUrl}`);
     
-    // Scrape all three versions
+    console.log('[Facebook] Logging in...');
+    await loginToFacebook(page, ctx);
+    
+    // Scrape all three versions (sequential - same page)
     const desktopPosts = await scrapeFacebookDesktop(page, targetUrl);
     const mobilePosts = await scrapeFacebookMobile(page, targetUrl);
     const videoPosts = await scrapeFacebookVideos(page, targetUrl);
@@ -119,7 +121,7 @@ function filterAndLimitPosts(posts, limit) {
 }
 
 async function extractFacebookPosts(page) {
-  await randomDelay(2000, 3000);
+  await randomDelay(1000, 1500);
 
   const postsData = await page.evaluate(() => {
     const results = [];

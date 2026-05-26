@@ -1,8 +1,0 @@
-[
-  {"name": "c_user", "value": "100004185848983", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": false, "secure": true, "sameSite": "None"},
-  {"name": "datr", "value": "UAmdaVo3MrIuFW_M3DsCmQ1d", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": true, "secure": true, "sameSite": "None"},
-  {"name": "dpr", "value": "1.5250000953674316", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": false, "secure": true, "sameSite": "None"},
-  {"name": "fr", "value": "1lPTVKA5a9U1WNvBN.AWccoYNIb52YVieqbQp0JaDfZHiVDXsdE9PgZXErssTW3rJbupI.BqCyd4..AAA.0.0.BqCyd-.AWc_zsHfbauyfg30JOvPOnU9zks", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": false, "secure": true, "sameSite": "None"},
-  {"name": "presence", "value": "C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1779115906764%2C%22v%22%3A1%7D", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": false, "secure": true, "sameSite": "None"},
-  {"name": "oo", "value": "v1", "domain": ".facebook.com", "path": "/", "expires": -1, "httpOnly": false, "secure": false, "sameSite": "Lax"}
-]

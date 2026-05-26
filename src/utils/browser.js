@@ -5,47 +5,133 @@ const path = require('path');
 
 const sessionDir = path.join(__dirname, '..', 'sessions');
 
-async function loginToInstagram(page) {
+async function isInstagramLoggedIn(page) {
+  try {
+    return await page.evaluate(() => {
+      const text = document.body.innerText.toLowerCase();
+      if (text.includes('log in') && text.includes('sign up')) return false;
+      return document.querySelector('article') !== null || text.includes('posts');
+    });
+  } catch (e) {
+    return false;
+  }
+}
+
+async function fillInputWithFallback(page, selectors, value) {
+  for (const sel of selectors) {
+    try {
+      const locator = page.locator(sel);
+      const count = await locator.count();
+      if (count > 0) {
+        await locator.first().fill(value);
+        console.log(`[Browser] Filled using selector: ${sel}`);
+        return true;
+      }
+    } catch (e) {
+      console.log(`[Browser] Selector '${sel}' failed: ${e.message.slice(0, 60)}`);
+    }
+  }
+  return false;
+}
+
+async function loginToInstagram(page, context) {
   const username = process.env.INSTAGRAM_USERNAME;
   const password = process.env.INSTAGRAM_PASSWORD;
+  const instagramSessionFile = path.join(sessionDir, 'instagram.json');
+
+  if (await fs.pathExists(instagramSessionFile)) {
+    try {
+      const cookies = await fs.readJson(instagramSessionFile);
+      if (cookies && cookies.length > 0) {
+        const hasSessionId = cookies.some(c => c.name === 'sessionid');
+        if (hasSessionId) {
+          await context.addCookies(cookies);
+          console.log('[Browser] Loaded existing Instagram session');
+          await page.goto('https://www.instagram.com/', { waitUntil: 'load', timeout: 15000 });
+          await randomDelay(2000, 3000);
+          if (await isInstagramLoggedIn(page)) {
+            console.log('[Browser] Instagram session valid!');
+            return true;
+          }
+          console.log('[Browser] Instagram session expired, logging in...');
+        }
+      }
+    } catch (e) {
+      console.log('[Browser] Error loading Instagram session:', e.message);
+    }
+  }
 
   if (!username || !password) {
     throw new Error('Instagram credentials not found in .env');
   }
 
   console.log('[Browser] Navigating to Instagram login...');
-  await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'networkidle', timeout: 25000 });
   await randomDelay(2000, 3000);
 
-  console.log('[Browser] Entering username...');
-  await page.fill('input[name="username"]', username);
+  const pageUrl = page.url();
+  const pageTitle = await page.title();
+  console.log(`[Browser] Login page loaded: ${pageUrl} (${pageTitle})`);
+
+  const usernameSelectors = ['input[name="username"]', 'input[type="text"]', 'input[autocomplete="username"]'];
+  const filled = await fillInputWithFallback(page, usernameSelectors, username);
+  if (!filled) {
+    const bodyPreview = await page.evaluate(() => document.body.innerText.slice(0, 300));
+    console.log(`[Browser] Could not find username field! Page text: ${bodyPreview}`);
+    return false;
+  }
   await randomDelay(500, 1000);
 
-  console.log('[Browser] Entering password...');
-  await page.fill('input[name="password"]', password);
+  const passwordSelectors = ['input[name="password"]', 'input[type="password"]', 'input[autocomplete="current-password"]'];
+  await fillInputWithFallback(page, passwordSelectors, password);
   await randomDelay(500, 1000);
 
   console.log('[Browser] Clicking login button...');
-  await page.click('button[type="submit"]');
+  const loginBtn = page.locator('button[type="submit"]');
+  if (await loginBtn.count() > 0) {
+    await loginBtn.first().click();
+  } else {
+    await page.keyboard.press('Enter');
+  }
   
   await randomDelay(5000, 8000);
 
-  const currentUrl = page.url();
-  console.log('[Browser] URL after login:', currentUrl);
+  console.log('[Browser] Checking login result...');
+  const afterUrl = page.url();
+  console.log(`[Browser] URL after login: ${afterUrl}`);
 
-  if (currentUrl.includes('login') || currentUrl.includes('challenge')) {
-    console.log('[Browser] Login may require verification - manual intervention needed');
+  if (afterUrl.includes('challenge') || afterUrl.includes('suspicious') || afterUrl.includes('recaptcha')) {
+    console.log('[Browser] Login blocked by recaptcha/challenge');
     return false;
   }
 
+  if (!(await isInstagramLoggedIn(page))) {
+    console.log('[Browser] Login form still visible, waiting longer...');
+    await randomDelay(5000, 8000);
+    if (!(await isInstagramLoggedIn(page))) {
+      const bodyPreview = await page.evaluate(() => document.body.innerText.slice(0, 300));
+      console.log(`[Browser] Login failed. Page text: ${bodyPreview}`);
+      return false;
+    }
+  }
+
   console.log('[Browser] Login successful!');
+
+  try {
+    const cookies = await context.cookies();
+    await fs.writeJson(instagramSessionFile, cookies);
+    console.log('[Browser] Saved Instagram session cookies');
+  } catch (e) {
+    console.log('[Browser] Error saving Instagram session:', e.message);
+  }
+
   return true;
 }
 
 async function loginToFacebook(page, context) {
   const username = process.env.FACEBOOK_USERNAME;
   const password = process.env.FACEBOOK_PASSWORD;
-  const facebookSessionFile = path.join(sessionDir, 'facebook.json');
+  const facebookSessionFile = path.join(sessionDir, 'facebook-cookies.json');
 
   // Check for existing session
   if (await fs.pathExists(facebookSessionFile)) {
@@ -56,7 +142,7 @@ async function loginToFacebook(page, context) {
         console.log('[Browser] Loaded existing Facebook session');
         
         // Verify session works
-        await page.goto('https://www.facebook.com/', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.goto('https://www.facebook.com/', { waitUntil: 'load', timeout: 10000 });
         await randomDelay(2000, 3000);
         
         const isLoggedIn = await page.evaluate(() => {
@@ -79,30 +165,49 @@ async function loginToFacebook(page, context) {
   }
 
   console.log('[Browser] Navigating to Facebook login...');
-  console.log('[Browser] NOTE: Browser is NOT headless - you can handle 2FA manually if needed');
-  await page.goto('https://www.facebook.com/login/', { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto('https://www.facebook.com/login/', { waitUntil: 'networkidle', timeout: 25000 });
   await randomDelay(2000, 3000);
 
+  const pageUrl = page.url();
+  const pageTitle = await page.title();
+  console.log(`[Browser] Login page loaded: ${pageUrl} (${pageTitle})`);
+
   console.log('[Browser] Entering email...');
-  await page.fill('#email', username);
+  const emailSelectors = ['#email', 'input[type="text"][name="email"]', 'input[data-testid="royal_email"]', 'input[autocomplete="username"]', 'input[name="email"]'];
+  const emailFilled = await fillInputWithFallback(page, emailSelectors, username);
+  if (!emailFilled) {
+    const bodyPreview = await page.evaluate(() => document.body.innerText.slice(0, 300));
+    console.log(`[Browser] Could not find email field! Page text: ${bodyPreview}`);
+    return false;
+  }
   await randomDelay(500, 1000);
 
   console.log('[Browser] Entering password...');
-  await page.fill('#pass', password);
+  const passSelectors = ['#pass', 'input[type="password"]', 'input[name="pass"]', 'input[data-testid="royal_pass"]'];
+  await fillInputWithFallback(page, passSelectors, password);
   await randomDelay(500, 1000);
 
   console.log('[Browser] Clicking login button...');
-  await page.click('button[name="login"]');
+  const btnSelectors = ['button[name="login"]', 'button[type="submit"]', 'input[type="submit"]', 'button[id*="login"]'];
+  for (const sel of btnSelectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.count() > 0) {
+        await btn.click();
+        console.log(`[Browser] Clicked button: ${sel}`);
+        break;
+      }
+    } catch (e) {}
+  }
   
-  console.log('[Browser] Waiting for login... (if 2FA needed, enter code in browser)');
-  await randomDelay(10000, 15000);
+  console.log('[Browser] Waiting for login...');
+  await randomDelay(8000, 12000);
 
-  const currentUrl = page.url();
-  console.log('[Browser] URL after login:', currentUrl);
+  const afterUrl = page.url();
+  console.log('[Browser] URL after login:', afterUrl);
 
-  if (currentUrl.includes('checkpoint') || currentUrl.includes('security')) {
+  if (afterUrl.includes('checkpoint') || afterUrl.includes('security')) {
     console.log('[Browser] ========== VERIFICATION NEEDED ==========');
-    console.log('[Browser] Please complete verification in the browser window');
     console.log('[Browser] Waiting 60 seconds for manual verification...');
     await randomDelay(60000, 60000);
     
@@ -136,14 +241,26 @@ async function launchBrowser() {
   
   const browser = await chromium.launch({
     headless: settings.headless,
-    slowMo: settings.slowMo
+    slowMo: settings.slowMo,
+    args: [
+      '--disable-blink-features=AutomationControlled'
+    ]
   });
 
   const context = await browser.newContext({
     viewport: settings.viewport,
     userAgent: settings.userAgent,
-    locale: 'en-US'
+    locale: 'en-US',
+    permissions: []
   });
+
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  });
+
+  context.setDefaultTimeout(15000);
 
   // Load Instagram cookies
   const instagramSessionFile = path.join(sessionDir, 'instagram.json');
