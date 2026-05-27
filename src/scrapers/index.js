@@ -32,7 +32,8 @@ async function scrapeAllPlatforms(accounts, companyName) {
     throw error;
   } finally {
     if (browser) {
-      await browser.close();
+      await new Promise(r => setTimeout(r, 2000));
+      await browser.close().catch(() => {});
       console.log('Browser closed');
     }
   }
@@ -48,15 +49,20 @@ async function runPlatformScrape(ctx, browser, platform, url, companyName, scrap
   
   console.log(`[${platform}] Using URL: ${url}`);
   
-  return Promise.race([
+  let settled = false;
+  const result = await Promise.race([
     doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn),
     new Promise(resolve => {
       setTimeout(() => {
-        console.log(`[${platform}] Timed out after ${PLATFORM_TIMEOUT_MS}ms`);
-        resolve(createResultObject(platform, []));
+        if (!settled) {
+          console.log(`[${platform}] Timed out after ${PLATFORM_TIMEOUT_MS}ms`);
+          resolve(createResultObject(platform, []));
+        }
       }, PLATFORM_TIMEOUT_MS);
     })
   ]);
+  settled = true;
+  return result;
 }
 
 async function doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn) {

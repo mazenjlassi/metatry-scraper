@@ -5,6 +5,129 @@ const path = require('path');
 
 const sessionDir = path.join(__dirname, '..', 'sessions');
 
+async function applyStealthPatches(context) {
+  await context.addInitScript(() => {
+    // 1. webdriver -> undefined (not false, some detectors check for false)
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => undefined,
+      configurable: true
+    });
+
+    // 2. Full plugins array
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+      ],
+      configurable: true
+    });
+
+    // 3. Full mimeTypes
+    Object.defineProperty(navigator, 'mimeTypes', {
+      get: () => {
+        const mt = new MimeTypeArray();
+        Object.defineProperty(mt, 'length', { value: 4 });
+        return mt;
+      },
+      configurable: true
+    });
+
+    // 4. navigator.languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+      configurable: true
+    });
+
+    // 5. navigator.permissions - block notification permission query
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission, onchange: null })
+        : originalQuery(parameters)
+    );
+
+    // 6. Complete window.chrome
+    if (!window.chrome) {
+      window.chrome = {};
+    }
+    window.chrome.runtime = {
+      id: undefined,
+      connect: () => {},
+      sendMessage: () => {},
+      getManifest: () => ({})
+    };
+    window.chrome.loadTimes = function() {
+      return {
+        requestTime: 0,
+        startLoadTime: 0,
+        commitLoadTime: 0,
+        finishDocumentLoadTime: 0,
+        finishLoadTime: 0,
+        firstPaintTime: 0,
+        firstPaintAfterLoadTime: 0,
+        navigationType: 'other',
+        wasFetchedViaSpdy: false,
+        wasNpnNegotiated: false,
+        npnNegotiatedProtocol: 'h2',
+        wasAlternateProtocolAvailable: false,
+        connectionInfo: 'http/2'
+      };
+    };
+    window.chrome.csi = function() {
+      return {
+        onloadT: 0,
+        startE: 0,
+        endE: 0,
+        onloadT: 0,
+        pageT: 'new',
+        tran: 15
+      };
+    };
+    window.chrome.app = {
+      isInstalled: false,
+      InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+      RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
+    };
+
+    // 7. WebGL vendor/renderer spoofing
+    const getParameterProxyHandler = {
+      apply: function(target, thisArg, args) {
+        const param = args[0];
+        const webglVendor = 'Intel Inc.';
+        const webglRenderer = 'Intel Iris OpenGL Engine';
+        const unmaskedVendor = 'Google Inc. (Intel)';
+        const unmaskedRenderer = 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)';
+
+        if (param === 37445) return webglVendor;
+        if (param === 37446) return webglRenderer;
+        if (param === 7936) return unmaskedVendor;
+        if (param === 7937) return unmaskedRenderer;
+        return target.apply(thisArg, args);
+      }
+    };
+
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl) {
+      const originalGetParameter = gl.getParameter.bind(gl);
+      gl.getParameter = new Proxy(gl.getParameter, getParameterProxyHandler);
+    }
+
+    // 8. hardwareConcurrency spoof
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      get: () => 8,
+      configurable: true
+    });
+
+    // 9. deviceMemory spoof
+    Object.defineProperty(navigator, 'deviceMemory', {
+      get: () => 8,
+      configurable: true
+    });
+  });
+}
+
 async function isInstagramLoggedIn(page) {
   try {
     return await page.evaluate(() => {
@@ -93,7 +216,7 @@ async function loginToInstagram(page, context) {
   } else {
     await page.keyboard.press('Enter');
   }
-  
+
   await randomDelay(5000, 8000);
 
   console.log('[Browser] Checking login result...');
@@ -133,22 +256,20 @@ async function loginToFacebook(page, context) {
   const password = process.env.FACEBOOK_PASSWORD;
   const facebookSessionFile = path.join(sessionDir, 'facebook-cookies.json');
 
-  // Check for existing session
   if (await fs.pathExists(facebookSessionFile)) {
     try {
       const cookies = await fs.readJson(facebookSessionFile);
       if (cookies && cookies.length > 0) {
         await context.addCookies(cookies);
         console.log('[Browser] Loaded existing Facebook session');
-        
-        // Verify session works
+
         await page.goto('https://www.facebook.com/', { waitUntil: 'load', timeout: 10000 });
         await randomDelay(2000, 3000);
-        
+
         const isLoggedIn = await page.evaluate(() => {
           return !document.body.innerText.includes('Connect with friends');
         });
-        
+
         if (isLoggedIn) {
           console.log('[Browser] Facebook session valid!');
           return true;
@@ -199,7 +320,7 @@ async function loginToFacebook(page, context) {
       }
     } catch (e) {}
   }
-  
+
   console.log('[Browser] Waiting for login...');
   await randomDelay(8000, 12000);
 
@@ -210,7 +331,7 @@ async function loginToFacebook(page, context) {
     console.log('[Browser] ========== VERIFICATION NEEDED ==========');
     console.log('[Browser] Waiting 60 seconds for manual verification...');
     await randomDelay(60000, 60000);
-    
+
     const finalUrl = page.url();
     if (!finalUrl.includes('checkpoint') && !finalUrl.includes('security')) {
       console.log('[Browser] Verification completed!');
@@ -220,7 +341,6 @@ async function loginToFacebook(page, context) {
     }
   }
 
-  // Save session on success
   try {
     const cookies = await context.cookies();
     await fs.writeJson(facebookSessionFile, cookies);
@@ -238,29 +358,45 @@ async function randomDelay(min, max) {
 
 async function launchBrowser() {
   await fs.ensureDir(sessionDir);
-  
+
+  const launchArgs = [
+    '--disable-blink-features=AutomationControlled',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-infobars',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-dev-shm-usage',
+    '--no-first-run',
+    '--disable-notifications'
+  ];
+
+  if (settings.brightDataProxy) {
+    launchArgs.push(`--proxy-server=${settings.brightDataProxy}`);
+    console.log('[Browser] Using Bright Data proxy');
+  }
+
   const browser = await chromium.launch({
     headless: settings.headless,
     slowMo: settings.slowMo,
-    args: [
-      '--disable-blink-features=AutomationControlled'
-    ]
+    args: launchArgs
   });
 
   const context = await browser.newContext({
     viewport: settings.viewport,
     userAgent: settings.userAgent,
     locale: 'en-US',
-    permissions: []
-  });
-
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    timezoneId: 'America/New_York',
+    permissions: [],
+    geolocation: { latitude: 40.7128, longitude: -74.0060 },
+    colorScheme: 'no-preference'
   });
 
   context.setDefaultTimeout(15000);
+
+  await applyStealthPatches(context);
 
   // Load Instagram cookies
   const instagramSessionFile = path.join(sessionDir, 'instagram.json');
@@ -296,15 +432,20 @@ async function launchBrowser() {
   }
 
   const page = await context.newPage();
-  
+
   context.on('close', async () => {
     try {
       const cookies = await context.cookies();
-      await fs.writeJson(sessionFile, cookies);
-      console.log('[Browser] Saved session cookies');
+      const igFile = path.join(sessionDir, 'instagram.json');
+      const fbFile = path.join(sessionDir, 'facebook-cookies.json');
+      const igCookies = cookies.filter(c => c.domain && c.domain.includes('instagram'));
+      const fbCookies = cookies.filter(c => c.domain && c.domain.includes('facebook'));
+      if (igCookies.length > 0) await fs.writeJson(igFile, igCookies);
+      if (fbCookies.length > 0) await fs.writeJson(fbFile, fbCookies);
+      console.log('[Browser] Auto-saved session cookies');
     } catch (e) {}
   });
-  
+
   return { browser, context, page };
 }
 
