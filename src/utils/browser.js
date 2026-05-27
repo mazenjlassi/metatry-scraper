@@ -5,127 +5,45 @@ const path = require('path');
 
 const sessionDir = path.join(__dirname, '..', 'sessions');
 
-async function applyStealthPatches(context) {
-  await context.addInitScript(() => {
-    // 1. webdriver -> undefined (not false, some detectors check for false)
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-      configurable: true
-    });
+const STEALTH_SCRIPT = () => {
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+  Object.defineProperty(navigator, 'plugins', { get: () => [
+    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+  ], configurable: true });
+  Object.defineProperty(navigator, 'mimeTypes', { get: () => { const mt = new MimeTypeArray(); Object.defineProperty(mt, 'length', { value: 4 }); return mt; }, configurable: true });
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+  const originalQuery = window.navigator.permissions.query;
+  window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+      ? Promise.resolve({ state: Notification.permission, onchange: null })
+      : originalQuery(parameters)
+  );
+  if (!window.chrome) window.chrome = {};
+  window.chrome.runtime = { id: undefined, connect() {}, sendMessage() {}, getManifest() { return {}; } };
+  window.chrome.loadTimes = function() { return { requestTime: 0, startLoadTime: 0, commitLoadTime: 0, finishDocumentLoadTime: 0, finishLoadTime: 0, firstPaintTime: 0, firstPaintAfterLoadTime: 0, navigationType: 'other', wasFetchedViaSpdy: false, wasNpnNegotiated: false, npnNegotiatedProtocol: 'h2', wasAlternateProtocolAvailable: false, connectionInfo: 'http/2' }; };
+  window.chrome.csi = function() { return { onloadT: 0, startE: 0, endE: 0, pageT: 'new', tran: 15 }; };
+  window.chrome.app = { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } };
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (gl) {
+    const originalGetParameter = gl.getParameter.bind(gl);
+    gl.getParameter = new Proxy(gl.getParameter, { apply(target, thisArg, args) {
+      const param = args[0];
+      if (param === 37445) return 'Intel Inc.';
+      if (param === 37446) return 'Intel Iris OpenGL Engine';
+      if (param === 7936) return 'Google Inc. (Intel)';
+      if (param === 7937) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)';
+      return target.apply(thisArg, args);
+    }});
+  }
+  Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+  Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
+};
 
-    // 2. Full plugins array
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [
-        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
-      ],
-      configurable: true
-    });
-
-    // 3. Full mimeTypes
-    Object.defineProperty(navigator, 'mimeTypes', {
-      get: () => {
-        const mt = new MimeTypeArray();
-        Object.defineProperty(mt, 'length', { value: 4 });
-        return mt;
-      },
-      configurable: true
-    });
-
-    // 4. navigator.languages
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-      configurable: true
-    });
-
-    // 5. navigator.permissions - block notification permission query
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-      parameters.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission, onchange: null })
-        : originalQuery(parameters)
-    );
-
-    // 6. Complete window.chrome
-    if (!window.chrome) {
-      window.chrome = {};
-    }
-    window.chrome.runtime = {
-      id: undefined,
-      connect: () => {},
-      sendMessage: () => {},
-      getManifest: () => ({})
-    };
-    window.chrome.loadTimes = function() {
-      return {
-        requestTime: 0,
-        startLoadTime: 0,
-        commitLoadTime: 0,
-        finishDocumentLoadTime: 0,
-        finishLoadTime: 0,
-        firstPaintTime: 0,
-        firstPaintAfterLoadTime: 0,
-        navigationType: 'other',
-        wasFetchedViaSpdy: false,
-        wasNpnNegotiated: false,
-        npnNegotiatedProtocol: 'h2',
-        wasAlternateProtocolAvailable: false,
-        connectionInfo: 'http/2'
-      };
-    };
-    window.chrome.csi = function() {
-      return {
-        onloadT: 0,
-        startE: 0,
-        endE: 0,
-        onloadT: 0,
-        pageT: 'new',
-        tran: 15
-      };
-    };
-    window.chrome.app = {
-      isInstalled: false,
-      InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-      RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
-    };
-
-    // 7. WebGL vendor/renderer spoofing
-    const getParameterProxyHandler = {
-      apply: function(target, thisArg, args) {
-        const param = args[0];
-        const webglVendor = 'Intel Inc.';
-        const webglRenderer = 'Intel Iris OpenGL Engine';
-        const unmaskedVendor = 'Google Inc. (Intel)';
-        const unmaskedRenderer = 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)';
-
-        if (param === 37445) return webglVendor;
-        if (param === 37446) return webglRenderer;
-        if (param === 7936) return unmaskedVendor;
-        if (param === 7937) return unmaskedRenderer;
-        return target.apply(thisArg, args);
-      }
-    };
-
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    if (gl) {
-      const originalGetParameter = gl.getParameter.bind(gl);
-      gl.getParameter = new Proxy(gl.getParameter, getParameterProxyHandler);
-    }
-
-    // 8. hardwareConcurrency spoof
-    Object.defineProperty(navigator, 'hardwareConcurrency', {
-      get: () => 8,
-      configurable: true
-    });
-
-    // 9. deviceMemory spoof
-    Object.defineProperty(navigator, 'deviceMemory', {
-      get: () => 8,
-      configurable: true
-    });
-  });
+async function applyStealthPatches(page) {
+  await page.evaluate(STEALTH_SCRIPT);
 }
 
 async function isInstagramLoggedIn(page) {
@@ -356,7 +274,53 @@ async function randomDelay(min, max) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function createPlatformContext(browser, platform) {
+  const ctx = await browser.newContext({
+    viewport: settings.viewport,
+    userAgent: settings.userAgent,
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+    permissions: [],
+    colorScheme: 'no-preference'
+  });
+
+  ctx.setDefaultTimeout(15000);
+
+  // Load only this platform's cookies
+  const cookieFiles = {
+    instagram: 'instagram.json',
+    facebook: 'facebook-cookies.json',
+    linkedin: 'linkedin-cookies.json'
+  };
+  const cookieFile = path.join(sessionDir, cookieFiles[platform]);
+  if (await fs.pathExists(cookieFile)) {
+    try {
+      const cookies = await fs.readJson(cookieFile);
+      if (cookies && cookies.length > 0) {
+        await ctx.addCookies(cookies);
+      }
+    } catch (e) {
+      console.log(`[Browser] Error loading ${platform} cookies:`, e.message);
+    }
+  }
+
+  // Save cookies on close
+  ctx.on('close', async () => {
+    try {
+      const cookies = await ctx.cookies();
+      const domain = platform === 'instagram' ? 'instagram' : platform === 'facebook' ? 'facebook' : 'linkedin';
+      const platCookies = cookies.filter(c => c.domain && c.domain.includes(domain));
+      if (platCookies.length > 0) {
+        await fs.writeJson(cookieFile, platCookies);
+      }
+    } catch (e) {}
+  });
+
+  return ctx;
+}
+
 async function launchBrowser() {
+  process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE || 'addBinding';
   await fs.ensureDir(sessionDir);
 
   const launchArgs = [
@@ -370,7 +334,9 @@ async function launchBrowser() {
     '--disable-renderer-backgrounding',
     '--disable-dev-shm-usage',
     '--no-first-run',
-    '--disable-notifications'
+    '--disable-notifications',
+    '--enable-unsafe-swiftshader',
+    '--disable-gpu'
   ];
 
   if (settings.brightDataProxy) {
@@ -384,69 +350,7 @@ async function launchBrowser() {
     args: launchArgs
   });
 
-  const context = await browser.newContext({
-    viewport: settings.viewport,
-    userAgent: settings.userAgent,
-    locale: 'en-US',
-    timezoneId: 'America/New_York',
-    permissions: [],
-    geolocation: { latitude: 40.7128, longitude: -74.0060 },
-    colorScheme: 'no-preference'
-  });
-
-  context.setDefaultTimeout(15000);
-
-  await applyStealthPatches(context);
-
-  // Load Instagram cookies
-  const instagramSessionFile = path.join(sessionDir, 'instagram.json');
-  if (await fs.pathExists(instagramSessionFile)) {
-    try {
-      const cookies = await fs.readJson(instagramSessionFile);
-      if (cookies && cookies.length > 0) {
-        const hasSessionId = cookies.some(c => c.name === 'sessionid');
-        if (hasSessionId) {
-          await context.addCookies(cookies);
-          console.log('[Browser] Loaded saved Instagram session with auth tokens');
-        } else {
-          console.log('[Browser] Instagram session cookies found but no auth token - will login');
-        }
-      }
-    } catch (e) {
-      console.log('[Browser] Error loading Instagram session:', e.message);
-    }
-  }
-
-  // Load Facebook cookies
-  const facebookCookieFile = path.join(sessionDir, 'facebook-cookies.json');
-  if (await fs.pathExists(facebookCookieFile)) {
-    try {
-      const cookies = await fs.readJson(facebookCookieFile);
-      if (cookies && cookies.length > 0) {
-        await context.addCookies(cookies);
-        console.log('[Browser] Loaded Facebook cookies');
-      }
-    } catch (e) {
-      console.log('[Browser] Error loading Facebook cookies:', e.message);
-    }
-  }
-
-  const page = await context.newPage();
-
-  context.on('close', async () => {
-    try {
-      const cookies = await context.cookies();
-      const igFile = path.join(sessionDir, 'instagram.json');
-      const fbFile = path.join(sessionDir, 'facebook-cookies.json');
-      const igCookies = cookies.filter(c => c.domain && c.domain.includes('instagram'));
-      const fbCookies = cookies.filter(c => c.domain && c.domain.includes('facebook'));
-      if (igCookies.length > 0) await fs.writeJson(igFile, igCookies);
-      if (fbCookies.length > 0) await fs.writeJson(fbFile, fbCookies);
-      console.log('[Browser] Auto-saved session cookies');
-    } catch (e) {}
-  });
-
-  return { browser, context, page };
+  return { browser };
 }
 
-module.exports = { launchBrowser, loginToInstagram, loginToFacebook };
+module.exports = { launchBrowser, createPlatformContext, loginToInstagram, loginToFacebook, applyStealthPatches };

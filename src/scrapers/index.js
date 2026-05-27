@@ -1,4 +1,4 @@
-const { launchBrowser } = require('../utils/browser');
+const { launchBrowser, createPlatformContext, applyStealthPatches } = require('../utils/browser');
 const { randomDelay } = require('../utils/delays');
 const { createResponse, createResultObject } = require('../models/postModel');
 const { scrapeInstagram } = require('./instagramScraper');
@@ -11,13 +11,13 @@ async function scrapeAllPlatforms(accounts, companyName) {
   let browser = null;
   
   try {
-    const { browser: b, context: ctx } = await launchBrowser();
+    const { browser: b } = await launchBrowser();
     browser = b;
     
     const results = await Promise.all([
-      runPlatformScrape(ctx, browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
-      runPlatformScrape(ctx, browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
-      runPlatformScrape(ctx, browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
+      runPlatformScrape(browser, 'instagram', accounts.instagram, companyName, scrapeInstagram),
+      runPlatformScrape(browser, 'facebook', accounts.facebook, companyName, scrapeFacebook),
+      runPlatformScrape(browser, 'linkedin', accounts.linkedin, companyName, scrapeLinkedIn)
     ]);
     
     const response = createResponse(companyName, results.filter(r => r.posts.length > 0));
@@ -41,7 +41,7 @@ async function scrapeAllPlatforms(accounts, companyName) {
 
 const PLATFORM_TIMEOUT_MS = 180000;
 
-async function runPlatformScrape(ctx, browser, platform, url, companyName, scraperFn) {
+async function runPlatformScrape(browser, platform, url, companyName, scraperFn) {
   if (!url) {
     console.log(`[${platform}] No URL provided, skipping...`);
     return createResultObject(platform, []);
@@ -51,7 +51,7 @@ async function runPlatformScrape(ctx, browser, platform, url, companyName, scrap
   
   let settled = false;
   const result = await Promise.race([
-    doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn),
+    doPlatformScrape(browser, platform, url, companyName, scraperFn),
     new Promise(resolve => {
       setTimeout(() => {
         if (!settled) {
@@ -65,9 +65,11 @@ async function runPlatformScrape(ctx, browser, platform, url, companyName, scrap
   return result;
 }
 
-async function doPlatformScrape(ctx, browser, platform, url, companyName, scraperFn) {
+async function doPlatformScrape(browser, platform, url, companyName, scraperFn) {
+  let ctx = null;
   let page = null;
   try {
+    ctx = await createPlatformContext(browser, platform);
     page = await ctx.newPage();
     
     let posts;
@@ -86,9 +88,8 @@ async function doPlatformScrape(ctx, browser, platform, url, companyName, scrape
     console.log(`[${platform}] Error: ${error.message}`);
     return createResultObject(platform, []);
   } finally {
-    if (page) {
-      await page.close().catch(() => {});
-    }
+    if (page) await page.close().catch(() => {});
+    if (ctx) await ctx.close().catch(() => {});
   }
 }
 
