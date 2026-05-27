@@ -2,6 +2,7 @@ const settings = require('../config/settings');
 const { randomDelay } = require('../utils/delays');
 const { createPostModel, PLATFORMS } = require('../models/postModel');
 const { extractHashtags, extractMentions } = require('../parsers/baseParser');
+const { loginToInstagram } = require('../utils/browser');
 
 async function dismissPopups(page) {
   for (let i = 0; i < 3; i++) {
@@ -25,8 +26,16 @@ async function scrapeInstagram(page, companyName, ctx, url) {
     );
 
     if (redirectedToLogin || page.url().includes('accounts/login')) {
-      console.log('[Instagram] Login wall - profile not publicly visible');
-      return [];
+      console.log('[Instagram] Login wall, attempting login...');
+      const loggedIn = await loginToInstagram(page, ctx);
+      if (!loggedIn) {
+        console.log('[Instagram] Login failed');
+        return [];
+      }
+      console.log('[Instagram] Login successful, navigating to profile...');
+      await page.goto(url, { waitUntil: 'load', timeout: 20000 });
+      await randomDelay(2000, 3000);
+      await dismissPopups(page);
     }
 
     for (let i = 0; i < 5; i++) {

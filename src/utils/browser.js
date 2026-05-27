@@ -142,8 +142,17 @@ async function loginToInstagram(page, context) {
   console.log(`[Browser] URL after login: ${afterUrl}`);
 
   if (afterUrl.includes('challenge') || afterUrl.includes('suspicious') || afterUrl.includes('recaptcha')) {
-    console.log('[Browser] Login blocked by recaptcha/challenge');
-    return false;
+    console.log('[Browser] ========== INSTAGRAM VERIFICATION NEEDED ==========');
+    console.log('[Browser] Solve the CAPTCHA in the browser window');
+    console.log('[Browser] Waiting 60 seconds for manual verification...');
+    await randomDelay(60000, 60000);
+    const finalUrl = page.url();
+    console.log(`[Browser] URL after wait: ${finalUrl}`);
+    if (finalUrl.includes('challenge') || finalUrl.includes('suspicious') || finalUrl.includes('recaptcha') || finalUrl.includes('accounts/login')) {
+      console.log('[Browser] Verification not completed');
+      return false;
+    }
+    console.log('[Browser] Verification completed!');
   }
 
   if (!(await isInstagramLoggedIn(page))) {
