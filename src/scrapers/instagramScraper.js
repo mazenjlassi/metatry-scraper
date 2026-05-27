@@ -120,30 +120,13 @@ async function extractPostUrls(page) {
   await randomDelay(1000, 1500);
   await dismissPopups(page);
 
-  const debug = await page.evaluate(() => {
+  const postLinks = await page.evaluate(() => {
     const anchors = document.querySelectorAll('a[href*="/p/"]');
-    const articles = document.querySelectorAll('article');
-    const hiddenLinks = document.querySelectorAll('a[href*="/p/"]');
-    const overlay = document.querySelector('div[role="presentation"]');
-    return {
-      postLinks: Array.from(anchors).map(a => a.href),
-      totalLinks: document.querySelectorAll('a[href]').length,
-      title: document.title,
-      articleCount: articles.length,
-      hasOverlay: !!overlay,
-      overlayHTML: overlay ? overlay.innerHTML.slice(0, 200) : '',
-      bodyPreview: document.body.innerText.slice(0, 400)
-    };
+    return [...new Set(Array.from(anchors).map(a => a.href))];
   });
 
-  console.log('[Instagram] Debug - title:', debug.title);
-  console.log('[Instagram] Debug - total links:', debug.totalLinks);
-  console.log('[Instagram] Debug - articles:', debug.articleCount);
-  console.log('[Instagram] Debug - overlay:', debug.hasOverlay);
-  console.log('[Instagram] Debug - post links:', debug.postLinks.length);
-  console.log('[Instagram] Debug - body:', debug.bodyPreview);
-
-  return [...new Set(debug.postLinks)].slice(0, settings.postLimit + 5);
+  console.log(`[Instagram] Found ${postLinks.length} post URLs`);
+  return postLinks.slice(0, settings.postLimit + 5);
 }
 
 async function scrapePostFromModal(page, postUrl) {
@@ -152,29 +135,30 @@ async function scrapePostFromModal(page, postUrl) {
     await randomDelay(1500, 2500);
     await dismissPopups(page);
 
-    const debug = await page.evaluate(() => ({
-      articleCount: document.querySelectorAll('article').length,
-      bodyPreview: document.body.innerText.slice(0, 500),
-      title: document.title,
-      url: location.href
-    }));
-
-    console.log('[Instagram] Post debug:', JSON.stringify(debug));
-
     const postData = await page.evaluate(() => {
-      const article = document.querySelector('article');
-      if (!article) return null;
-
-      const spans = article.querySelectorAll('span');
+      const meta = document.querySelector('meta[property="og:description"]');
       let text = '';
-      for (const s of spans) {
-        const t = s.innerText.trim();
-        if (t.length > 20) { text = t; break; }
+      if (meta) {
+        text = meta.getAttribute('content') || '';
+        const colonIdx = text.indexOf(': ');
+        if (colonIdx > 0) text = text.slice(colonIdx + 2);
+      }
+      if (!text || text.length < 10) {
+        const spans = document.querySelectorAll('span');
+        for (const s of spans) {
+          const t = s.innerText.trim();
+          if (t.length > 30 && !t.startsWith('http')) { text = t; break; }
+        }
       }
 
-      const timeEl = article.querySelector('time');
-      const time = timeEl ? (timeEl.getAttribute('datetime') || '') : '';
-      return { text: text.slice(0, 500), time };
+      const timeEl = document.querySelector('time');
+      const timeAttr = timeEl ? (timeEl.getAttribute('datetime') || '') : '';
+
+      const altText = document.querySelector('img[alt*="Photo by"], img[alt*="Video by"], img[alt*="carousel"]');
+      const captionText = altText ? altText.getAttribute('alt') || '' : '';
+      if (!text && captionText.length > 20) text = captionText;
+
+      return { text: text.slice(0, 600), time: timeAttr };
     });
 
     if (!postData || !postData.text || postData.text.length < 10) {
